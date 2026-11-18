@@ -1,0 +1,60 @@
+﻿{
+    "default_role":  "å¤§è‚¥é±¼",
+    "dotenv":  [
+                   "..\\..\\.env",
+                   "..\\brain\\.env"
+               ],
+    "providers":  {
+                      "dsh-account":  {
+                                          "type":  "harness",
+                                          "dsh_root":  "",
+                                          "dsh_home":  "",
+                                          "timeout_s":  180,
+                                          "model":  "deepseek-flash"
+                                      },
+                      "deepseek-remote":  {
+                                              "type":  "openai",
+                                              "base_url":  "https://api.deepseek.com/v1",
+                                              "model":  "deepseek-chat",
+                                              "api_key_env":  "DEEPSEEK_API_KEY",
+                                              "timeout_s":  120
+                                          },
+                      "local-ollama":  {
+                                           "type":  "openai",
+                                           "base_url":  "http://127.0.0.1:11434/v1",
+                                           "model":  "qwen3.5:9b",
+                                           "api_key_env":  "",
+                                           "timeout_s":  180
+                                       },
+                      "gemini":  {
+                                     "type":  "openai",
+                                     "base_url":  "https://generativelanguage.googleapis.com/v1beta/openai/",
+                                     "model":  "gemini-3-flash-preview",
+                                     "api_key_env":  "GEMINI_API_KEY",
+                                     "timeout_s":  120
+                                 }
+                  },
+    "routes":  {
+                   "å¤§è‚¥é±¼":  {
+                                     "provider":  "dsh-account",
+                                     "model":  "deepseek-flash"
+                                 },
+                   "æ¡Œå® ":  {
+                                  "provider":  "dsh-account",
+                                  "model":  "deepseek-flash"
+                              },
+                   "å¥³ä»†":  {
+                                  "provider":  "deepseek-remote",
+                                  "model":  "deepseek-chat",
+                                  "api_key_env":  "DEEPSEEK_API_KEY_MAID"
+                              }
+               },
+    "default_route":  {
+                          "provider":  "gemini",
+                          "model":  "gemini-3-flash-preview"
+                      },
+    "fallbacks":  [
+                      "deepseek-remote",
+                      "local-ollama"
+                  ]
+}
