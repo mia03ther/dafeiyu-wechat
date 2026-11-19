@@ -1,5 +1,5 @@
-大肥鱼 Dafeiyu（dafeiyu-open）
-Copyright (C) 2026 newbiecraft-kaixin 及贡献者
+大肥鱼 Dafeiyu（dafeiyu-wechat）
+Copyright (C) 2026 mia03ther 及贡献者
 
 本仓库是「大肥鱼」自研部分的开源发布，同时修改、组合并对接了多个上游开源项目。
 它属于上游作品的修改版：相关修改时间为 2026 年 11 月。
@@ -40,6 +40,6 @@ services/hub、model、store、brain、audio、video、subtitle、shared/infra�
 上游组件按其各自许可使用。
 
 ---
-Dafeiyu (dafeiyu-open) is a derivative work: it modifies and integrates the upstream
+Dafeiyu (dafeiyu-wechat) is a derivative work: it modifies and integrates the upstream
 projects listed above (modified in November 2026). Copyright of upstream code remains
 with the original authors. All upstream licenses are preserved as stated.

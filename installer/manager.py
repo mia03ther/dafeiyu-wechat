@@ -52,7 +52,7 @@ SERVICES = ROOT / "services"
 LOG_DIR = SERVICES / "hub" / "data"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-REPO_SLUG = "newbiecraft-kaixin/dafeiyu-open"
+REPO_SLUG = "mia03ther/dafeiyu-wechat"
 REPO_BRANCH = "main"
 REPO_ZIP = f"https://codeload.github.com/{REPO_SLUG}/zip/refs/heads/{REPO_BRANCH}"
 
@@ -528,7 +528,7 @@ def _skip(rel: Path) -> bool:
 
 def fetch_repo_zip(log, url: str = REPO_ZIP) -> Path:
     log(f"→ {url}")
-    target = Path(tempfile.gettempdir()) / f"dafeiyu-open-{REPO_BRANCH}.zip"
+    target = Path(tempfile.gettempdir()) / f"dafeiyu-wechat-{REPO_BRANCH}.zip"
     try:
         _urllib_download(url, target, log)
     except Exception as error:  # noqa: BLE001 - 网络异常时换系统下载器
@@ -597,8 +597,8 @@ def detect_local_repo() -> Path | None:
     env = os.environ.get("DFY_REPO", "").strip()
     candidates = [
         Path(env) if env else None,
-        Path.home() / "IdeaProjects" / "dafeiyu-open",
-        Path.home() / "dafeiyu-open",
+        Path.home() / "IdeaProjects" / "dafeiyu-wechat",
+        Path.home() / "dafeiyu-wechat",
         Path.home() / "IdeaProjects" / "dafeiyu",
     ]
     for candidate in candidates:
@@ -910,7 +910,7 @@ def donor_root() -> Path | None:
     program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
     candidates += [
         Path(program_files) / "FlatFish",
-        Path.home() / "dafeiyu-open",
+        Path.home() / "dafeiyu-wechat",
         Path.home() / "dafeiyu",
     ]
     best: tuple[int, Path] | None = None

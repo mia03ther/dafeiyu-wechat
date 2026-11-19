@@ -1,7 +1,7 @@
 ﻿# 大肥鱼 一键下载部署（无需先克隆仓库）
 #
 # 直接在 PowerShell 里执行：
-#   irm https://raw.githubusercontent.com/newbiecraft-kaixin/dafeiyu-open/main/installer/bootstrap.ps1 | iex
+#   irm https://raw.githubusercontent.com/mia03ther/dafeiyu-wechat/main/installer/bootstrap.ps1 | iex
 #
 # 可选参数（下载到本地后再运行）：
 #   -Dest "D:\FlatFish"   安装目录，默认 C:\Program Files\FlatFish
@@ -13,7 +13,7 @@
 [CmdletBinding()]
 param(
     [string]$Dest = (Join-Path $env:ProgramFiles "FlatFish"),
-    [string]$Repo = "newbiecraft-kaixin/dafeiyu-open",
+    [string]$Repo = "mia03ther/dafeiyu-wechat",
     [string]$Branch = "main",
     [switch]$Full,
     [switch]$NoLaunch
@@ -47,7 +47,7 @@ Write-Host "  目标目录：$Dest" -ForegroundColor DarkGray
 
 # 1. 下载仓库压缩包
 Write-Step "下载仓库"
-$zip = Join-Path $env:TEMP "dafeiyu-open-$Branch.zip"
+$zip = Join-Path $env:TEMP "dafeiyu-wechat-$Branch.zip"
 Invoke-WebRequest -Uri "https://codeload.github.com/$Repo/zip/refs/heads/$Branch" -OutFile $zip -UseBasicParsing
 Write-Ok ("已下载 " + [math]::Round((Get-Item $zip).Length / 1MB, 1) + " MB")
 

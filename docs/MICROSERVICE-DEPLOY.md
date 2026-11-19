@@ -61,8 +61,8 @@
 python -V   # 必须 >= 3.12，否则 winget install --id Python.Python.3.12 -e
 
 # 2. Git 克隆完整仓库（每台机器都克隆完整仓库，service.json 清单和 shared/infra 是共享代码）
-git clone https://github.com/newbiecraft-kaixin/dafeiyu-open.git
-cd dafeiyu-open
+git clone https://github.com/mia03ther/dafeiyu-wechat.git
+cd dafeiyu-wechat
 
 # 3. 按角色装依赖（install.bat 对应项）
 #    A 机：-Select 1,2,3,4,5,6   （环境/核心/AstrBot/插件/NapCat/微信桥）

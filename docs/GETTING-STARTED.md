@@ -240,8 +240,8 @@ AstrBot 是开源的多平台聊天机器人框架（AGPL-3.0）。它不提供�
 ## 4. 方式一：一键安装（推荐）
 
 ```powershell
-git clone https://github.com/newbiecraft-kaixin/dafeiyu-open.git
-cd dafeiyu-open
+git clone https://github.com/mia03ther/dafeiyu-wechat.git
+cd dafeiyu-wechat
 .\install.bat
 ```
 
@@ -275,13 +275,13 @@ cd dafeiyu-open
 在 PowerShell（不是 cmd）里执行：
 
 ```powershell
-irm https://raw.githubusercontent.com/newbiecraft-kaixin/dafeiyu-open/main/installer/bootstrap.ps1 | iex
+irm https://raw.githubusercontent.com/mia03ther/dafeiyu-wechat/main/installer/bootstrap.ps1 | iex
 ```
 
 它会下载仓库压缩包、解压到 `%USERPROFILE%\dafeiyu`、执行「运行环境 + 核心四服务」两步，然后打开管理面板。需要全量安装或换目录时，先把脚本存下来再带参数运行：
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/newbiecraft-kaixin/dafeiyu-open/main/installer/bootstrap.ps1 -OutFile "$env:TEMP\bootstrap.ps1"
+Invoke-WebRequest https://raw.githubusercontent.com/mia03ther/dafeiyu-wechat/main/installer/bootstrap.ps1 -OutFile "$env:TEMP\bootstrap.ps1"
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\bootstrap.ps1" -Full -Dest D:\dafeiyu
 ```
 

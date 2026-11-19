@@ -102,7 +102,7 @@ if (-not (Test-Path $tgz)) {
     # 安装包随仓库提供；万一本机删掉了，再从 Release 取同版本
     $tgz = Join-Path $env:TEMP "dsh-pet-0.4.1.tgz"
     if (-not (Test-Path $tgz)) {
-        $url = "https://github.com/newbiecraft-kaixin/dafeiyu-open/releases/download/v0.1.0/dsh-pet-0.4.1.tgz"
+        $url = "https://github.com/mia03ther/dafeiyu-wechat/releases/download/v0.1.0/dsh-pet-0.4.1.tgz"
         Write-Host "本地没有安装包，正在从 Release 下载：$url"
         Invoke-WebRequest $url -OutFile $tgz -UseBasicParsing
     }
