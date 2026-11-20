@@ -170,7 +170,12 @@ class BalanceMixin:
                 timeout=aiohttp.ClientTimeout(total=20)
             ) as sess:
                 async with sess.get(
-                    url, headers={"Authorization": f"Bearer {key}"}
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "Accept": "application/json",
+                        "User-Agent": DEEPSEEK_UA,
+                    },
                 ) as r:
                     if r.status == 401:
                         self._balance_error = "key 无效（401），去 platform.deepseek.com 重新生成"
@@ -178,7 +183,25 @@ class BalanceMixin:
                     if r.status != 200:
                         self._balance_error = f"接口返回 HTTP {r.status}（{url}）"
                         return None
-                    data = await r.json()
+                    # r.json() raises ContentTypeError/JSONDecodeError when the
+                    # endpoint returns a WAF page or an empty body on a flaky
+                    # network; parse the raw text so the error says what
+                    # actually came back instead of a bare exception name.
+                    raw = await r.text()
+                    try:
+                        data = json.loads(raw)
+                    except json.JSONDecodeError:
+                        self._balance_error = f"接口返回了非 JSON 内容（HTTP {r.status}）"
+                        logger.warning(
+                            "[human_sim] DeepSeek balance returned non-JSON "
+                            "(HTTP %s): %.120r",
+                            r.status,
+                            raw[:120],
+                        )
+                        return None
+                    if not isinstance(data, dict):
+                        self._balance_error = "接口返回的余额格式不对"
+                        return None
         except asyncio.TimeoutError:
             self._balance_error = f"请求超时（{url}）"
             return None
@@ -225,7 +248,19 @@ class BalanceMixin:
                     if r.status != 200:
                         self._balance_error = f"DSH 账号余额接口返回 HTTP {r.status}"
                         return None
-                    body = await r.json()
+                    # Same non-JSON hardening as the API-key path above.
+                    raw = await r.text()
+                    try:
+                        body = json.loads(raw)
+                    except json.JSONDecodeError:
+                        self._balance_error = f"DSH 账号余额接口返回了非 JSON 内容（HTTP {r.status}）"
+                        logger.warning(
+                            "[human_sim] DSH balance returned non-JSON "
+                            "(HTTP %s): %.120r",
+                            r.status,
+                            raw[:120],
+                        )
+                        return None
         except asyncio.TimeoutError:
             self._balance_error = f"请求超时（{url}）"
             return None

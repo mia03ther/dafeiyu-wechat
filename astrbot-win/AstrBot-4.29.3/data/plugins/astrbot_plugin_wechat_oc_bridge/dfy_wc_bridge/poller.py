@@ -20,8 +20,9 @@ import socket
 import subprocess
 import sys
 import time
-import urllib.request
+import urllib.error
 import urllib.parse
+import urllib.request
 from collections import deque
 
 from astrbot.api import logger
@@ -1385,13 +1386,54 @@ class WechatPoller:
             if not key:
                 ds_line = "DeepSeek：未找到 API key"
             else:
-                req = urllib.request.Request(
-                    "https://api.deepseek.com/user/balance",
-                    headers={"Authorization": "Bearer " + key,
-                             "Accept": "application/json"},
-                )
-                with urllib.request.urlopen(req, timeout=15) as r:
-                    d = json.loads(r.read().decode("utf-8", "replace"))
+                # The balance endpoint sometimes returns non-JSON (WAF block
+                # page, empty body on a flaky campus network). A single
+                # transient glitch used to surface as JSONDecodeError, so
+                # retry once on parse/network errors before giving up.
+                # HTTP errors (401/429/5xx) fail fast, no retry.
+                d = None
+                last_err: Exception | None = None
+                for attempt in range(2):
+                    try:
+                        req = urllib.request.Request(
+                            "https://api.deepseek.com/user/balance",
+                            headers={
+                                "Authorization": "Bearer " + key,
+                                "Accept": "application/json",
+                                "User-Agent": (
+                                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                    "Chrome/131.0.0.0 Safari/537.36"
+                                ),
+                            },
+                        )
+                        with urllib.request.urlopen(req, timeout=15) as r:
+                            raw = r.read().decode("utf-8", "replace")
+                        if not raw.strip():
+                            raise ValueError("empty response body")
+                        d = json.loads(raw)
+                        if not isinstance(d, dict):
+                            raise ValueError("unexpected JSON shape")
+                        break
+                    except urllib.error.HTTPError:
+                        raise
+                    except (
+                        json.JSONDecodeError,
+                        ValueError,
+                        urllib.error.URLError,
+                        TimeoutError,
+                    ) as exc:
+                        last_err = exc
+                        logger.warning(
+                            "[wechat_bridge] DeepSeek balance attempt %d failed: %s: %s",
+                            attempt + 1,
+                            type(exc).__name__,
+                            exc,
+                        )
+                        if attempt == 0:
+                            time.sleep(2)
+                if d is None:
+                    raise last_err if last_err is not None else ValueError("unknown error")
                 infos = d.get("balance_infos") or []
                 if d.get("is_available") and infos:
                     parts = []
@@ -1418,13 +1460,52 @@ class WechatPoller:
                     kd = json.load(f)
                 key = str(kd.get("simular_api_key") or "").strip()
             if key:
-                req = urllib.request.Request(
-                    "https://api.simular.ai/v1/agents/account",
-                    headers={"Authorization": "Bearer " + key,
-                             "Accept": "application/json"},
-                )
-                with urllib.request.urlopen(req, timeout=15) as r:
-                    d = json.loads(r.read().decode("utf-8", "replace"))
+                # Same transient-failure hardening as the DeepSeek call above:
+                # read raw text, retry once on parse/network errors, fail fast
+                # on HTTP errors. The raw body is only logged, never echoed.
+                d = None
+                last_err: Exception | None = None
+                for attempt in range(2):
+                    try:
+                        req = urllib.request.Request(
+                            "https://api.simular.ai/v1/agents/account",
+                            headers={
+                                "Authorization": "Bearer " + key,
+                                "Accept": "application/json",
+                                "User-Agent": (
+                                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                    "Chrome/131.0.0.0 Safari/537.36"
+                                ),
+                            },
+                        )
+                        with urllib.request.urlopen(req, timeout=15) as r:
+                            raw = r.read().decode("utf-8", "replace")
+                        if not raw.strip():
+                            raise ValueError("empty response body")
+                        d = json.loads(raw)
+                        if not isinstance(d, dict):
+                            raise ValueError("unexpected JSON shape")
+                        break
+                    except urllib.error.HTTPError:
+                        raise
+                    except (
+                        json.JSONDecodeError,
+                        ValueError,
+                        urllib.error.URLError,
+                        TimeoutError,
+                    ) as exc:
+                        last_err = exc
+                        logger.warning(
+                            "[wechat_bridge] Simular balance attempt %d failed: %s: %s",
+                            attempt + 1,
+                            type(exc).__name__,
+                            exc,
+                        )
+                        if attempt == 0:
+                            time.sleep(2)
+                if d is None:
+                    raise last_err if last_err is not None else ValueError("unknown error")
                 credits = d.get("credits") or {}
                 usd = credits.get("usd")
                 plan = (d.get("plan") or {}).get("title", "")
