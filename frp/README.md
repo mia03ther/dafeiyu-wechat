@@ -19,7 +19,7 @@ Tailscale 在校园网里老断（UDP 打洞被限，只能走 DERP 中继）。
 - 阿里云安全组要放行入方向 7000（frpc 连 frps）和 6022（云 VM 连 SSH）。
   frps 本身有 token 鉴权，6022 上的 SSH 只认密钥。
 
-## 用法（云 VM 连本子）
+## 用法（连本子）
 
 ```bash
 ssh -p 6022 24525@120.25.214.139
@@ -27,6 +27,13 @@ ssh -p 6022 24525@120.25.214.139
 
 Tailscale 正常时继续走 Tailscale；断了就走 frp。`ssh-laptop.sh`（待补）会自动先试
 Tailscale 再试 frp。
+
+**⚠️ 云 VM（htch-runtime）走不了 frp：**它的出口代理只放行 443 端口的 CONNECT，
+直连 SSH 会被 198.19.0.1:3128 reset（2026-11-20 实测）。所以 VM 自己的访问仍靠
+Tailscale；frp 是给用户（和任何正常网络的机器）用的备用入口——Tailscale 断了，
+用户仍能从自己的电脑/手机经阿里云 SSH 进本子。frp 通道本身（本子↔阿里云）已
+验证通：frpc 日志 `login to server success` + `proxy added: [laptop-ssh]`，
+服务器上 6022 已监听。
 
 ## 重装
 
