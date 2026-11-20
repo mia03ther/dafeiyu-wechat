@@ -1,0 +1,3 @@
+# frps (Aliyun ECS) — /etc/frp/frps.toml. Fill in the same token as frpc.
+bindPort = 7000
+auth.token = "REPLACE_WITH_FRP_TOKEN"

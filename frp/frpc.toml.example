@@ -1,0 +1,14 @@
+# frpc (Windows laptop) — copy to C:\dafeiyu-open\frp\frpc.toml and fill in the token.
+# The token must match /etc/frp/frps.toml on the Aliyun server.
+# NEVER commit the real token: it lives in C:\dafeiyu-open\api_keys.json (frp_token).
+serverAddr = "120.25.214.139"
+serverPort = 7000
+auth.token = "REPLACE_WITH_FRP_TOKEN"
+loginFailExit = false
+
+[[proxies]]
+name = "laptop-ssh"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 22
+remotePort = 6022
