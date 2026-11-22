@@ -789,13 +789,20 @@ class WechatPoller:
                 return url
         return ""
 
-    def _caption_sync(self, url: str) -> str | None:
-        """Blocking vision call (runs in a worker thread). None on any failure."""
+    def _caption_sync(self, url: str | None) -> str | None:
+        """Blocking vision call (runs in a worker thread). None on any failure.
+
+        Args:
+            url: Downloadable image URL, or None to screenshot the WeChat
+                window instead (regular [图片] photos have no URL).
+        """
         try:
             env = dict(os.environ)
             env["PYTHONUTF8"] = "1"
+            cmd = [sys.executable, CAPTION_SCRIPT]
+            cmd.append("--screenshot" if url is None else url)
             proc = subprocess.run(
-                [sys.executable, CAPTION_SCRIPT, url],
+                cmd,
                 capture_output=True, timeout=CAPTION_TIMEOUT_S, env=env,
             )
         except Exception as exc:  # noqa: BLE001 (timeout etc.)
@@ -815,7 +822,10 @@ class WechatPoller:
         """Replace a bare [图片]/[表情] tag with a captioned one, when possible.
 
         Groups only (DMs left alone). Never raises, never passes an error
-        string to the LLM: any failure returns the item unchanged.
+        string to the LLM. Regular [图片] photos have no downloadable URL,
+        so they fall back to screenshotting the WeChat window; if both
+        vision paths fail, a [图片] is marked as unseen so the LLM does
+        not invent its contents.
         """
         text = str(item.get("content") or "").strip()
         if text not in ("[图片]", "[表情]"):
@@ -823,14 +833,23 @@ class WechatPoller:
         if str(item.get("chat_type") or "") != "group":
             return item
         url = self._caption_url(item)
-        if not url:
-            return item
-        try:
-            desc = await asyncio.to_thread(self._caption_sync, url)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"[wechat_bridge] 图片描述异常: {exc}")
-            return item
+        desc = None
+        if url:
+            try:
+                desc = await asyncio.to_thread(self._caption_sync, url)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[wechat_bridge] caption failed: {exc}")
         if not desc:
+            # Screenshot fallback: the image is visible in the WeChat window.
+            try:
+                desc = await asyncio.to_thread(self._caption_sync, None)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[wechat_bridge] screenshot caption failed: {exc}")
+        if not desc:
+            if text == "[图片]":
+                item = dict(item)
+                item["content"] = "[图片：我看不到这张图的内容，不要猜测图片里有什么]"
+                logger.info("[wechat_bridge] image unseen, marked as such")
             return item
         label = text.strip("[]")
         item = dict(item)
