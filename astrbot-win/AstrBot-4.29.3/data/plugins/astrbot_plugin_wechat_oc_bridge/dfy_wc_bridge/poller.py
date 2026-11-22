@@ -282,6 +282,10 @@ class WechatPoller:
         # injection) and last busy-line reply (10-min cooldown).
         self._last_bot_reply: dict[str, float] = {}
         self._last_busy: dict[str, float] = {}
+        # 最近一张图的描述缓存 {chat_uid: (ts, "[图片：描述]")}，供 @ 问图时
+        # 直接贴进当前问题。2026-11-22 黄仁勋实测：描述只进了群聊窗口，
+        # 没进 @ 回复的上下文，问图必须当场带上描述才答得对。
+        self._last_image_caption: dict[str, tuple[float, str]] = {}
         # persons.json / chat_summary.json caches: (mtime, data).
         self._persons_cache: tuple[float, dict] | None = None
         self._summary_cache: tuple[float, dict] | None = None
@@ -542,6 +546,9 @@ class WechatPoller:
             if "@大肥鱼" in str(item.get("content") or ""):
                 has_mention = True
         if has_mention:
+            # 问图 (2026-11-22)：@ 问图时先把最近的图片描述贴进问题本身，
+            # 不依赖群聊窗口（实测描述进不了 @ 回复的上下文）。
+            item = await self._maybe_attach_image_caption(item, chat)
             # Web search (2026-11-17): @ + question -> Bing first, results
             # go into the prompt so the answer is grounded, not guessed.
             item = await self._maybe_websearch(item)
@@ -849,12 +856,58 @@ class WechatPoller:
             if text == "[图片]":
                 item = dict(item)
                 item["content"] = "[图片：我看不到这张图的内容，不要猜测图片里有什么]"
+                self._cache_image_caption(item)
                 logger.info("[wechat_bridge] image unseen, marked as such")
             return item
         label = text.strip("[]")
         item = dict(item)
         item["content"] = f"[{label}：{desc}]"
+        self._cache_image_caption(item)
         logger.info(f"[wechat_bridge] 图片描述: {item['content'][:80]}")
+        return item
+
+    def _cache_image_caption(self, item: dict) -> None:
+        """把一张已描述（或已标记看不到）的图记进本群的描述缓存。"""
+        chat_uid = str(item.get("chat_uid") or "").strip()
+        if not chat_uid:
+            return
+        self._last_image_caption[chat_uid] = (
+            time.time(), str(item.get("content") or ""))
+
+    async def _maybe_attach_image_caption(self, item: dict, chat: str) -> dict:
+        """@ 问图时，把最近一张图的描述直接贴进当前问题。
+
+        2026-11-22 实测：图片的描述只进了群聊窗口，没进 @ 回复的上下文，
+        用户发图后马上 @ 问“这是谁”，DeepSeek 手里没有图的信息，只能瞎编。
+        所以问图时不再依赖历史窗口，当场把描述贴进问题本身。
+        只在群里生效；没有新鲜描述时当场截屏补一次；都拿不到就不改问题。
+        """
+        if str(item.get("chat_type") or "") != "group":
+            return item
+        text = str(item.get("content") or "")
+        now = time.time()
+        cached = self._last_image_caption.get(chat)
+        fresh = cached is not None and now - cached[0] < 300
+        # 问图的信号：提到图，或者刚发过图（60 秒内）就 @ 提问。
+        asks_image = any(w in text for w in (
+            "图片", "照片", "这张", "这是", "是谁", "这是什么",
+            "图里", "图上", "看到", "认出"))
+        if not asks_image and not (fresh and now - cached[0] < 60):
+            return item
+        if fresh:
+            item = dict(item)
+            item["content"] = f"{cached[1]}\n{text}"
+            return item
+        # 没缓存（比如图片被表情包回敬吃掉了，没走描述）：当场截屏看一次。
+        try:
+            desc = await asyncio.to_thread(self._caption_sync, None)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[wechat_bridge] 问图补截屏失败: {exc}")
+            return item
+        if not desc:
+            return item
+        item = dict(item)
+        item["content"] = f"[图片：{desc}]\n{text}"
         return item
 
     async def _maybe_websearch(self, item: dict) -> dict:
@@ -1392,7 +1445,9 @@ class WechatPoller:
         try:
             key = ""
             cfg_path = r"C:\dafeiyu-open\astrbot-win\AstrBot-4.29.3\data\cmd_config.json"
-            with open(cfg_path, encoding="utf-8") as f:
+            # NOTE: AstrBot writes this file with a UTF-8 BOM; plain utf-8
+            # raises JSONDecodeError and the balance lookup fails (2026-11-22).
+            with open(cfg_path, encoding="utf-8-sig") as f:
                 cfg = json.load(f)
             for s in cfg.get("provider_sources") or []:
                 if s.get("id") == "deepseek_source":
@@ -1475,7 +1530,9 @@ class WechatPoller:
             key = ""
             keys_path = r"C:\dafeiyu-open\api_keys.json"
             if os.path.exists(keys_path):
-                with open(keys_path, encoding="utf-8") as f:
+                # NOTE: this file has a UTF-8 BOM (same as cmd_config.json);
+                # plain utf-8 raises JSONDecodeError (2026-11-22).
+                with open(keys_path, encoding="utf-8-sig") as f:
                     kd = json.load(f)
                 key = str(kd.get("simular_api_key") or "").strip()
             if key:
