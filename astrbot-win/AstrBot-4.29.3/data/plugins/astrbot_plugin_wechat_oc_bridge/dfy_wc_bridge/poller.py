@@ -78,6 +78,10 @@ GF_PERSONA = (
 # never 广外, never DMs, never posters/reports (those don't go through
 # _emit at all).
 GROUP_MAI = "54306443862@chatroom"
+# 迈阿醚群的人设（喵 / 屑屑 / tickled）。NOTE：这份文本只留作记录，
+# 不要再每条消息拼一份——2026-11-23 之前 _emit 每条消息都拼它，
+# AstrBot 历史里同一段人设攒了 28 份，模型以为用户在刷屏。
+# 人设由系统提示词里的 persona 段承载（每次 prompt 约 906 字）。
 MAI_MIAO_PERSONA = (
     "[大肥鱼在迈阿醚群的说话习惯] "
     "你在这个群里有时会像猫一样说话：大约三分之一的闲聊回复，可以在句尾自然地加一个“喵”。"
@@ -719,16 +723,18 @@ class WechatPoller:
                 item = dict(item)
                 refs = []
                 # P2-3 person card (sender) + P2-4/P3-1-lite summary (group).
+                # NOTE: 这里只拼 refs，不拼人设。MAI_MIAO_PERSONA 以前每条消息
+                # 都拼一份，AstrBot 存进历史后群聊窗口里同一段人设出现 28 次，
+                # 模型以为用户在刷屏（2026-11-23 08:34 回“这条我闭着眼都能背了”）。
+                # 人设只放系统提示词（每次 prompt 里 persona 段已有 906 字）。
                 pref = self._person_ref(chat, str(item.get("sender_uid") or ""))
                 if pref:
                     refs.append(pref)
                 sref = self._summary_ref(chat, str(item.get("content") or ""))
                 if sref:
                     refs.append(sref)
-                prefix = MAI_MIAO_PERSONA
                 if refs:
-                    prefix += "\n" + "\n".join(refs)
-                item["content"] = prefix + "\n" + str(item.get("content") or "")
+                    item["content"] = "\n".join(refs) + "\n" + str(item.get("content") or "")
             self._last_bot_reply[chat] = time.time()
         self._note_bot_send(chat)
         self.context.get_event_queue().put_nowait(
