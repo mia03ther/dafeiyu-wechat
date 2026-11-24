@@ -36,6 +36,13 @@ from .io_client import IoWechatClient
 # Auto-welcome: shared with the 5-min watcher cron (welcome_watcher.py).
 # Both read/write this so a join is welcomed exactly once.
 WELCOME_STATE_PATH = r"C:\dafeiyu-open\welcome_state.json"
+# Poller heartbeat (2026-11-24): _pump writes "<unix_ts> <seq>" here at most
+# once per minute. The VM health check reads it; if AstrBot is up but the
+# heartbeat is stale >5 min, the pump loop is stuck and AstrBot gets
+# restarted. The poller "stops" recurred 2026-11-19/20 with no error in
+# the logs -- _pump catches everything, so a stall leaves no trace except
+# the missing heartbeat.
+POLLER_HEARTBEAT_PATH = r"C:\dafeiyu-open\poller_heartbeat.txt"
 WELCOME_INTRO = {
     "45270768515@chatroom": "这里是广外AI共创，聊 AI、整活、薅羊毛都行",
     "54306443862@chatroom": "这里是迈阿醚TML后台",
@@ -262,6 +269,7 @@ class WechatPoller:
         self.settings = settings
         self.client = IoWechatClient(str(settings["io_base"]))
         self._seq = 0
+        self._last_hb = 0.0  # last poller heartbeat write (epoch seconds)
         self._seen: deque[str] = deque(maxlen=300)
         self._task: asyncio.Task | None = None
         self._flush_task: asyncio.Task | None = None
@@ -391,6 +399,16 @@ class WechatPoller:
                     await self._handle(item)
                 self._seq = max(self._seq, seq)
                 warned = False
+                # Heartbeat: prove the pump loop is alive (see
+                # POLLER_HEARTBEAT_PATH). At most once per minute.
+                _now = time.time()
+                if _now - self._last_hb >= 60:
+                    self._last_hb = _now
+                    try:
+                        with open(POLLER_HEARTBEAT_PATH, "w", encoding="utf-8") as _f:
+                            _f.write(f"{int(_now)} {self._seq}")
+                    except OSError:
+                        pass
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
