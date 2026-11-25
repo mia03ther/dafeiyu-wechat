@@ -26,6 +26,16 @@ def _xml_attrs(raw: str) -> Dict[str, str]:
     return {key.lower(): html.unescape(value) for key, value in pairs}
 
 
+def _cdata(raw: str | None) -> str:
+    """Strip a <![CDATA[...]]> wrapper and unescape entities."""
+    if not raw:
+        return ""
+    s = raw.strip()
+    if s.startswith("<![CDATA[") and s.endswith("]]>"):
+        s = s[9:-3]
+    return html.unescape(s).strip()
+
+
 def parse_content(content: str) -> tuple[str, List[Dict[str, Any]]]:
     """微信的图片/表情/视频消息给的是整段 XML，这里拆成可读正文 + 结构化媒体。"""
     text = str(content or "").strip()
@@ -64,7 +74,21 @@ def parse_content(content: str) -> tuple[str, List[Dict[str, Any]]]:
     appmsg = re.search(r"<appmsg\b", text, re.I)
     if appmsg:
         title = re.search(r"<title>(.*?)</title>", text, re.I | re.S)
-        label = html.unescape(title.group(1).strip()) if title else ""
+        label = _cdata(title.group(1)) if title else ""
+        # 2026-11-25: 链接以前只留标题、URL 直接丢了，机器人根本看不到
+        # 链接是什么，只能回“光秃秃的标题”。现在把 <url>（和 <des>）也
+        # 放进 media，桥接才能去抓内容再回答“这什么意思”。
+        url_m = re.search(r"<url>(.*?)</url>", text, re.I | re.S)
+        url = _cdata(url_m.group(1)) if url_m else ""
+        des_m = re.search(r"<des>(.*?)</des>", text, re.I | re.S)
+        des = _cdata(des_m.group(1)) if des_m else ""
+        if url:
+            media.append({
+                "kind": "link",
+                "url": url,
+                "name": label,
+                "desc": des,
+            })
         return ("[链接] " + label if label else "[链接]"), media
     return "[消息]", media
 

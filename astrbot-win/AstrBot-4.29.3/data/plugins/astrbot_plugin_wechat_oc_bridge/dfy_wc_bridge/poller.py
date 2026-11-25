@@ -127,6 +127,16 @@ WEBSEARCH_MAX_RESULTS = 3
 WEBSEARCH_SNIPPET_CHARS = 100
 WEBSEARCH_TIMEOUT_S = 15
 
+# Link fetch (2026-11-25): a [链接] message used to reach the bot as just
+# a bare title -- io-wechat's parse_content dropped the <url>, so the bot
+# could only reply "光秃秃的标题". The URL now comes in media (kind=link);
+# the poller fetches the page and injects readable text so the bot can
+# actually answer "这什么意思". WeChat articles / video pages usually
+# serve readable HTML to a browser UA; JS-only pages fail and are marked
+# unreadable instead of hallucinated.
+LINK_FETCH_TIMEOUT_S = 12
+LINK_FETCH_MAX_CHARS = 1500
+
 # Logistic-regression weights (MaiBot reply_likelihood.py, fitted offline).
 LOGIT_W = {
     "intercept": -1.2005, "mention_bot": 1.5852, "at_other": -1.1157,
@@ -263,6 +273,57 @@ def _bing_search_sync(query: str) -> list[dict]:
     return results
 
 
+def _fetch_link_sync(url: str) -> str | None:
+    """Blocking link fetch. Returns readable page text (<=LINK_FETCH_MAX_CHARS) or None.
+
+    Args:
+        url: Page URL (http/https only).
+
+    Returns:
+        Cleaned body text, or None when the page cannot be fetched or has
+        no readable text (JS-only page, login wall, non-HTML content).
+    """
+    if not url.startswith(("http://", "https://")):
+        return None
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Encoding": "identity",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=LINK_FETCH_TIMEOUT_S) as r:
+            ctype = (r.headers.get("Content-Type") or "").lower()
+            if "text" not in ctype and "html" not in ctype and "xml" not in ctype:
+                return None
+            raw = r.read(512 * 1024)
+    except Exception:
+        return None
+    charset = "utf-8"
+    m = re.search(r"charset=([\w-]+)", ctype)
+    if m:
+        charset = m.group(1)
+    else:
+        mm = re.search(rb'<meta[^>]+charset=["\']?([\w-]+)', raw[:4096], re.I)
+        if mm:
+            charset = mm.group(1).decode("ascii", errors="ignore")
+    try:
+        text = raw.decode(charset, errors="replace")
+    except (LookupError, UnicodeDecodeError):
+        try:
+            text = raw.decode("utf-8", errors="replace")
+        except Exception:
+            return None
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    text = " ".join(text.split())
+    if len(text) < 20:
+        return None
+    return text[:LINK_FETCH_MAX_CHARS]
+
+
 class WechatPoller:
     def __init__(self, context: Context, settings: dict) -> None:
         self.context = context
@@ -298,6 +359,10 @@ class WechatPoller:
         # 直接贴进当前问题。2026-11-22 黄仁勋实测：描述只进了群聊窗口，
         # 没进 @ 回复的上下文，问图必须当场带上描述才答得对。
         self._last_image_caption: dict[str, tuple[float, str]] = {}
+        # 最近一条链接的抓取内容缓存 {chat_uid: (ts, "[链接：标题：正文]")}，
+        # 供 @ 问链接时直接贴进当前问题。2026-11-25 同款问题：链接内容
+        # 只进了群聊窗口，没进 @ 回复的上下文，问链接必须当场带上才答得对。
+        self._last_link: dict[str, tuple[float, str]] = {}
         # persons.json / chat_summary.json caches: (mtime, data).
         self._persons_cache: tuple[float, dict] | None = None
         self._summary_cache: tuple[float, dict] | None = None
@@ -552,6 +617,9 @@ class WechatPoller:
         # available, so DeepSeek can react to what it actually sees.
         # Any failure falls back silently to the plain tag.
         item = await self._maybe_caption(item)
+        # Link (2026-11-25): a [链接] gets its page fetched and summarised
+        # so the bot can answer "这什么意思" instead of "光秃秃的标题".
+        item = await self._maybe_fetch_link(item)
         # Girlfriend DM: reply to every message immediately, no debounce
         # and no proactive gating.
         if self._is_girlfriend_dm(item):
@@ -571,6 +639,9 @@ class WechatPoller:
             # 问图 (2026-11-22)：@ 问图时先把最近的图片描述贴进问题本身，
             # 不依赖群聊窗口（实测描述进不了 @ 回复的上下文）。
             item = await self._maybe_attach_image_caption(item, chat)
+            # 问链接 (2026-11-25)：@ 问链接时先把最近的链接抓取内容贴进
+            # 问题本身，同款原因——链接内容进不了 @ 回复的上下文。
+            item = await self._maybe_attach_link(item, chat)
             # Web search (2026-11-17): @ + question -> Bing first, results
             # go into the prompt so the answer is grounded, not guessed.
             item = await self._maybe_websearch(item)
@@ -932,6 +1003,99 @@ class WechatPoller:
             return item
         item = dict(item)
         item["content"] = f"[图片：{desc}]\n{text}"
+        return item
+
+    def _link_url(self, item: dict) -> str:
+        """Link URL from media (kind == 'link'), or ''.
+
+        io-wechat's parse_content puts the appmsg <url> in media since
+        2026-11-25; before that the bot only ever saw a bare title.
+        """
+        for m in (item.get("media") or []):
+            if not isinstance(m, dict):
+                continue
+            if str(m.get("kind") or "") != "link":
+                continue
+            url = str(m.get("url") or "").strip()
+            if url.startswith(("http://", "https://")):
+                return url
+        return ""
+
+    async def _maybe_fetch_link(self, item: dict) -> dict:
+        """Link message -> fetch the page and replace the bare tag with a summary.
+
+        Groups only. Runs when a [链接] message arrives (the URL now comes
+        from io-wechat media). The fetched text is cached per chat so a
+        later @-question about the link can attach it (see
+        _maybe_attach_link). Never raises; on any failure the tag is marked
+        as unreadable so the LLM does not invent the link's contents.
+        """
+        text = str(item.get("content") or "").strip()
+        if not text.startswith("[链接]"):
+            return item
+        if str(item.get("chat_type") or "") != "group":
+            return item
+        url = self._link_url(item)
+        title = text[len("[链接]"):].strip()
+        if not url:
+            item = dict(item)
+            item["content"] = (
+                f"[链接：{title}（没有链接地址，不要猜测里面有什么）]"
+                if title else "[链接（没有链接地址，不要猜测里面有什么）]"
+            )
+            self._cache_link(item)
+            return item
+        try:
+            body = await asyncio.to_thread(_fetch_link_sync, url)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[wechat_bridge] 链接抓取异常: {exc}")
+            body = None
+        item = dict(item)
+        if body:
+            item["content"] = (
+                f"[链接：{title}：{body}]" if title else f"[链接：{body}]"
+            )
+        else:
+            item["content"] = (
+                f"[链接：{title}（打不开链接内容，不要猜测里面有什么）]"
+                if title else "[链接（打不开链接内容，不要猜测里面有什么）]"
+            )
+        self._cache_link(item)
+        logger.info(f"[wechat_bridge] 链接已抓取: {item['content'][:80]}")
+        return item
+
+    def _cache_link(self, item: dict) -> None:
+        """把一条已抓取（或已标记打不开）的链接记进本群的链接缓存。"""
+        chat_uid = str(item.get("chat_uid") or "").strip()
+        if not chat_uid:
+            return
+        self._last_link[chat_uid] = (
+            time.time(), str(item.get("content") or ""))
+
+    async def _maybe_attach_link(self, item: dict, chat: str) -> dict:
+        """@ 问链接时，把最近一条链接的抓取内容直接贴进当前问题。
+
+        2026-11-25：用户发链接后马上 @ 问“这什么意思”，链接内容只进了
+        群聊窗口，没进 @ 回复的上下文，DeepSeek 手里没有链接信息，只能
+        回“光秃秃的标题”。所以问链接时不再依赖历史窗口，当场把抓取内容
+        贴进问题本身。只在群里生效；没有新鲜链接时不改问题。
+        """
+        if str(item.get("chat_type") or "") != "group":
+            return item
+        text = str(item.get("content") or "")
+        now = time.time()
+        cached = self._last_link.get(chat)
+        fresh = cached is not None and now - cached[0] < 300
+        # 问链接的信号：提到链接/这是什么/什么意思，或者刚发过链接
+        # （60 秒内）就 @ 提问。
+        asks_link = any(w in text for w in (
+            "链接", "这是什么", "什么意思", "讲了什么", "里面", "看看", "点开"))
+        if not asks_link and not (fresh and now - cached[0] < 60):
+            return item
+        if not fresh:
+            return item
+        item = dict(item)
+        item["content"] = f"{cached[1]}\n{text}"
         return item
 
     async def _maybe_websearch(self, item: dict) -> dict:
