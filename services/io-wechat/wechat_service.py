@@ -53,7 +53,7 @@ def _setup_file_log() -> None:
     超过 5MB 就截断重写，避免无限长。
     """
     try:
-        path = _HERE.parents[1] / "io-wechat.log"
+        path = _HERE.parents[2] / "io-wechat.log"
         if path.exists() and path.stat().st_size > 5 * 1024 * 1024:
             path.write_text("", encoding="utf-8")
         f = open(path, "a", encoding="utf-8", buffering=1)
