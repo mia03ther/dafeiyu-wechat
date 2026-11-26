@@ -313,3 +313,57 @@ def ensure_visible() -> None:
             g.bring_to_front(keep_topmost=False)
     except Exception as exc:  # noqa: BLE001
         log("ensure_visible failed:", exc)
+
+
+def restore_wechat_window() -> bool:
+    """把最小化到托盘的微信主窗口还原（不抢焦点），供附着失败时调用。
+
+    2026-11-26：桥 21:06 重启后 17 分钟附不上去（ok:false，feed 为空），
+    就是因为微信最小化到了托盘、UIA 树收起，wechatauto 附不上去。
+    这个函数不依赖 state.wx（附着前 state.wx 还是 None），直接枚举
+    顶层窗口找 Weixin.exe 的主窗口，最小化了就用 SW_SHOWNOACTIVATE
+    还原（不抢焦点、不弹到前台），让下一次附着能成功。
+    没找到窗口 / 不需要还原时返回 False。
+    """
+    try:
+        u = ctypes.windll.user32
+        k = ctypes.windll.kernel32
+        found = []
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        def _enum(hwnd, _):
+            try:
+                pid = ctypes.c_ulong(0)
+                u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                if not pid.value:
+                    return True
+                handle = k.OpenProcess(0x1000, False, pid.value)
+                if not handle:
+                    return True
+                try:
+                    buf = ctypes.create_unicode_buffer(1024)
+                    size = ctypes.c_ulong(len(buf))
+                    if not k.QueryFullProcessImageNameW(
+                            handle, 0, buf, ctypes.byref(size)):
+                        return True
+                    if os.path.basename(buf.value).lower() == "weixin.exe":
+                        found.append(int(hwnd))
+                finally:
+                    k.CloseHandle(handle)
+            except Exception:  # noqa: BLE001
+                pass
+            return True
+
+        u.EnumWindows(_enum, 0)
+        restored = False
+        for hwnd in found:
+            try:
+                if u.IsWindowVisible(hwnd) and u.IsIconic(hwnd):
+                    u.ShowWindow(hwnd, 4)  # SW_SHOWNOACTIVATE
+                    restored = True
+            except Exception:  # noqa: BLE001
+                continue
+        return restored
+    except Exception as exc:  # noqa: BLE001
+        log("restore_wechat_window failed:", exc)
+        return False

@@ -45,7 +45,26 @@ from wxsvc.state import counts  # noqa: E402
 from wxsvc.util import log  # noqa: E402
 
 
+def _setup_file_log() -> None:
+    """把 stdout/stderr 重定向到 io-wechat.log（追加，行缓冲）。
+
+    2026-11-26：桥 21:05 死了，死因查不到——计划任务起的进程 stdout
+    没地方存，traceback 直接丢了。以后崩了先看这个文件。
+    超过 5MB 就截断重写，避免无限长。
+    """
+    try:
+        path = _HERE.parents[1] / "io-wechat.log"
+        if path.exists() and path.stat().st_size > 5 * 1024 * 1024:
+            path.write_text("", encoding="utf-8")
+        f = open(path, "a", encoding="utf-8", buffering=1)
+        sys.stdout = f
+        sys.stderr = f
+    except Exception:
+        pass
+
+
 def main() -> None:
+    _setup_file_log()
     log(f"starting on 127.0.0.1:{PORT} (legacy {LEGACY_PORT})")
     threading.Thread(target=attach_loop, name="wx-attach", daemon=True).start()
 

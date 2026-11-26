@@ -30,4 +30,12 @@ def attach_loop() -> None:
             if not shown:
                 log("attach failed, retrying:", exc)
                 shown = True
+            # 2026-11-26：附着失败最常见的原因是微信最小化到了托盘、
+            # UIA 树收起，干等 5 秒重试没用。先把窗口还原（不抢焦点），
+            # 再重试，附着才有机会成功。
+            try:
+                if window.restore_wechat_window():
+                    log("微信窗口已从托盘还原，重试附着")
+            except Exception:  # noqa: BLE001
+                pass
             time.sleep(5)
