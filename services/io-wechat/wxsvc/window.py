@@ -316,54 +316,60 @@ def ensure_visible() -> None:
 
 
 def restore_wechat_window() -> bool:
-    """把最小化到托盘的微信主窗口还原（不抢焦点），供附着失败时调用。
+    """把隐藏/最小化到托盘的微信主窗口还原（不抢焦点），供附着失败时调用。
 
     2026-11-26：桥 21:06 重启后 17 分钟附不上去（ok:false，feed 为空），
     就是因为微信最小化到了托盘、UIA 树收起，wechatauto 附不上去。
-    这个函数不依赖 state.wx（附着前 state.wx 还是 None），直接枚举
-    顶层窗口找 Weixin.exe 的主窗口，最小化了就用 SW_SHOWNOACTIVATE
-    还原（不抢焦点、不弹到前台），让下一次附着能成功。
+    2026-11-27 早上又犯了：桥 09:26 重启，附着失败，一直到 09:40
+    kbd_send 发消息时把隐藏窗口还原了，桥才在 09:40:17 附上——
+    原因是第一版只还原「可见且最小化」的窗口（IsWindowVisible and
+    IsIconic），而最小化到托盘的窗口是隐藏的（IsWindowVisible=False），
+    被跳过了。这一版改成：找最大的微信窗口（标题 weixin 或类名
+    Qt51514QWindowIcon，同 kbd_send 的找法），只要它不可见或最小化
+    就用 SW_SHOWNOACTIVATE 还原（不抢焦点），让下一次附着能成功。
+    这个函数不依赖 state.wx（附着前 state.wx 还是 None）。
     没找到窗口 / 不需要还原时返回 False。
     """
     try:
         u = ctypes.windll.user32
-        k = ctypes.windll.kernel32
-        found = []
+        cands = []
 
         @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
         def _enum(hwnd, _):
             try:
-                pid = ctypes.c_ulong(0)
-                u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                if not pid.value:
+                title_buf = ctypes.create_unicode_buffer(256)
+                u.GetWindowTextW(hwnd, title_buf, 256)
+                cls_buf = ctypes.create_unicode_buffer(256)
+                u.GetClassNameW(hwnd, cls_buf, 256)
+                title = title_buf.value or ""
+                cls = cls_buf.value or ""
+                if title.lower() != "weixin" and cls != "Qt51514QWindowIcon":
                     return True
-                handle = k.OpenProcess(0x1000, False, pid.value)
-                if not handle:
-                    return True
-                try:
-                    buf = ctypes.create_unicode_buffer(1024)
-                    size = ctypes.c_ulong(len(buf))
-                    if not k.QueryFullProcessImageNameW(
-                            handle, 0, buf, ctypes.byref(size)):
-                        return True
-                    if os.path.basename(buf.value).lower() == "weixin.exe":
-                        found.append(int(hwnd))
-                finally:
-                    k.CloseHandle(handle)
+                rect = (ctypes.c_long * 4)()
+                u.GetWindowRect(hwnd, rect)
+                area = max(0, rect[2] - rect[0]) * max(0, rect[3] - rect[1])
+                vis = bool(u.IsWindowVisible(hwnd))
+                cands.append((int(hwnd), area, vis))
             except Exception:  # noqa: BLE001
                 pass
             return True
 
         u.EnumWindows(_enum, 0)
-        restored = False
-        for hwnd in found:
-            try:
-                if u.IsWindowVisible(hwnd) and u.IsIconic(hwnd):
-                    u.ShowWindow(hwnd, 4)  # SW_SHOWNOACTIVATE
-                    restored = True
-            except Exception:  # noqa: BLE001
-                continue
-        return restored
+        if not cands:
+            return False
+        cands.sort(key=lambda item: -item[1])
+        hwnd, _area, vis = cands[0]
+        try:
+            minimized = bool(u.IsIconic(hwnd))
+        except Exception:  # noqa: BLE001
+            minimized = False
+        if vis and not minimized:
+            return False
+        try:
+            u.ShowWindow(hwnd, 4)  # SW_SHOWNOACTIVATE：显示/还原，不抢焦点
+        except Exception:  # noqa: BLE001
+            return False
+        return True
     except Exception as exc:  # noqa: BLE001
         log("restore_wechat_window failed:", exc)
         return False
