@@ -95,6 +95,10 @@ def handle_send(req) -> Any:
         return ok({"to": uid, "status": status})
     except Exception as exc:  # noqa: BLE001
         state.counts.inc("send_failed")
+        # Log the reason (2026-11-27): the noon greeting 503'd twice for
+        # 广外 and the reason was only in the HTTP body, not in any log,
+        # so the failure could not be diagnosed from the laptop.
+        log("send failed:", type(exc).__name__, str(exc))
         return fail(f"{type(exc).__name__}: {exc}", 503)
 
 
@@ -117,4 +121,5 @@ def handle_send_image(req) -> Any:
         return ok({"to": uid, "status": status})
     except Exception as exc:  # noqa: BLE001
         state.counts.inc("send_failed")
+        log("send_image failed:", type(exc).__name__, str(exc))
         return fail(f"{type(exc).__name__}: {exc}", 503)

@@ -1168,17 +1168,34 @@ def kbd_send_group(group_name: str, text: str, keep_newlines: bool = False) -> s
     if not text:
         raise RuntimeError("kbd_send: empty text after sanitize")
 
-    _input_click(hwnd)
-    time.sleep(0.5)
-    _set_clipboard(text)
-    _hotkey(win32con.VK_CONTROL, ord("V"))
-    time.sleep(1.0)
-    # Honesty check (2026-11-16): verify the text actually landed in the
-    # input box before pressing Enter. If the click missed the box or the
-    # wrong chat is open, the read-back will not match and we must NOT
-    # report kbd-sent. Without this, a blind paste+Enter reports success
-    # while sending nothing (proven by screenshot 2026-11-16).
-    if not _verify_input_box(text):
+    # Paste + verify, retry once on failure (2026-11-27): the noon greeting
+    # to 广外 failed twice (503) with the group open but the text never
+    # landing in the input box -- a transient missed click / slow UI.
+    # Retry is safe against double-send: on verify failure we clear the
+    # input box (Ctrl+A + Delete) before re-pasting, so a partial paste
+    # can never accumulate into a duplicated message.
+    pasted = False
+    for attempt in (1, 2):
+        _input_click(hwnd)
+        time.sleep(0.5)
+        _set_clipboard(text)
+        _hotkey(win32con.VK_CONTROL, ord("V"))
+        time.sleep(1.0)
+        # Honesty check (2026-11-16): verify the text actually landed in the
+        # input box before pressing Enter. If the click missed the box or the
+        # wrong chat is open, the read-back will not match and we must NOT
+        # report kbd-sent. Without this, a blind paste+Enter reports success
+        # while sending nothing (proven by screenshot 2026-11-16).
+        if _verify_input_box(text):
+            pasted = True
+            break
+        log(f"kbd_send: paste verify attempt {attempt} failed for {group_name}")
+        if attempt == 1:
+            # Clear whatever (partially) landed, then retry the click+paste.
+            _hotkey(win32con.VK_CONTROL, ord("A"))
+            _key(win32con.VK_DELETE)
+            time.sleep(0.5)
+    if not pasted:
         raise RuntimeError(
             "kbd_send: pasted text did not land in the input box "
             "(wrong click or wrong chat open); aborting, NOT sent"
@@ -1251,14 +1268,28 @@ def kbd_send_dm(contact_name: str, text: str, keep_newlines: bool = False) -> st
     if not text:
         raise RuntimeError("kbd_send: empty text after sanitize")
 
-    _input_click(hwnd)
-    time.sleep(0.5)
-    _set_clipboard(text)
-    _hotkey(win32con.VK_CONTROL, ord("V"))
-    time.sleep(1.0)
-    # Honesty check (2026-11-16): verify the text actually landed in the
-    # input box before pressing Enter. See kbd_send_group.
-    if not _verify_input_box(text):
+    # Paste + verify, retry once on failure (2026-11-27, same as
+    # kbd_send_group): a transient missed click / slow UI must not fail
+    # the whole send. Clear the input box before re-pasting so a partial
+    # paste can never accumulate into a duplicated message.
+    pasted = False
+    for attempt in (1, 2):
+        _input_click(hwnd)
+        time.sleep(0.5)
+        _set_clipboard(text)
+        _hotkey(win32con.VK_CONTROL, ord("V"))
+        time.sleep(1.0)
+        # Honesty check (2026-11-16): verify the text actually landed in the
+        # input box before pressing Enter. See kbd_send_group.
+        if _verify_input_box(text):
+            pasted = True
+            break
+        log(f"kbd_send: paste verify attempt {attempt} failed for DM {contact_name}")
+        if attempt == 1:
+            _hotkey(win32con.VK_CONTROL, ord("A"))
+            _key(win32con.VK_DELETE)
+            time.sleep(0.5)
+    if not pasted:
         raise RuntimeError(
             "kbd_send: pasted text did not land in the input box "
             "(wrong click or wrong chat open); aborting, NOT sent"
